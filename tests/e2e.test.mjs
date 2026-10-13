@@ -311,6 +311,36 @@ e2e('big buses render across two lanes', async () => {
   assert.ok(Math.abs(r.long - 3) < 0.1, `long side is ${r.long} cells`);
 });
 
+e2e('game events play the theme\'s sounds', async () => {
+  await startLevel(2); // Space Port
+  await js(`TKSound.setMuted(false), TKSound.history.length = 0, true`);
+  await js(`(() => {
+    const g = TKDebug.game();
+    g.cars.find((c) => TKLevels.firstBlocker(c, g.W, g.H, g.occ).blocker >= 0).el.click();
+    g.cars.find((c) => c.color === g.queue[0] && TKLevels.firstBlocker(c, g.W, g.H, g.occ).blocker < 0)?.el.click()
+      ?? g.cars.find((c) => TKLevels.firstBlocker(c, g.W, g.H, g.occ).blocker < 0).el.click();
+  })(), true`);
+  await until(`TKSound.history.some((h) => h.name === 'board')`);
+  const heard = await js(`TKSound.history.map((h) => h.theme + ':' + h.name + ':' + h.played)`);
+  for (const s of ['space:bump:true', 'space:select:true', 'space:drive:true', 'space:board:true']) {
+    assert.ok(heard.includes(s), `missing ${s} in ${heard}`);
+  }
+  assert.equal(await js(`TKSound.history.findIndex((h) => h.name === 'select') < TKSound.history.findIndex((h) => h.name === 'drive')`), true);
+});
+
+e2e('the sound button mutes, and the choice survives a reload', async () => {
+  await js(`TKSound.setMuted(false), true`);
+  await js(`document.getElementById('btn-sound').click(), true`);
+  assert.equal(await js(`TKSound.muted`), true);
+  assert.equal(await js(`document.getElementById('btn-sound').getAttribute('aria-pressed')`), 'true');
+  await open(`${origin}${BASE}#debug`);
+  assert.equal(await js(`TKSound.muted`), true);
+  assert.equal(await js(`TKSound.play('select')`), false);
+  await js(`document.getElementById('btn-sound').click(), true`);
+  assert.equal(await js(`localStorage.getItem('transport-king.muted')`), '0');
+  assert.equal(await js(`TKSound.play('select')`), true);
+});
+
 e2e('no page errors during the whole run', () => {
   assert.deepEqual(pageErrors, []);
 });
