@@ -19,7 +19,7 @@ jobs:
           node-version-file: .nvmrc
       - run: node --version
       - name: Unit tests (generator, rules, PWA config)
-        run: node --test tests/levels.test.js tests/pwa.test.js
+        run: node --test tests/levels.test.js tests/pwa.test.js tests/solver.test.js
         env:
           LEVELS: 500
       - name: End-to-end tests (headless Chrome)
