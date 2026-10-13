@@ -9,7 +9,11 @@
  *  - every car can eventually leave the lot (no deadlocked blocks);
  *  - passenger counts per colour exactly equal the seats of that colour;
  *  - the queue is built from a real solution that never needs more than
- *    `slots - 1` parking spots at once, so a careful player can always win.
+ *    `slots` parking spots at once, so a careful player can always win.
+ *
+ * Map size, spots (1-6), colours, seats per vehicle and how much of the line
+ * is visible are all rolled from the level seed. Several mazes are built per
+ * level and the one with the deepest chains of blocking cars is kept.
  */
 (function (root) {
   'use strict';
@@ -23,12 +27,22 @@
     { hex: '#f97316', name: 'Orange', glyph: '♥︎' },
     { hex: '#ec4899', name: 'Pink', glyph: '✚' },
     { hex: '#06b6d4', name: 'Cyan', glyph: '☾' },
+    { hex: '#92400e', name: 'Brown', glyph: '✦' },
+    { hex: '#e2e8f0', name: 'White', glyph: '▼' },
   ];
+
+  // Vehicle sizes in cells (len along the driving direction, wid across it).
+  // Seats are a multiple of the level's base seat count.
+  const VEHICLES = {
+    car: { len: 2, wid: 1, seats: 1 },
+    van: { len: 3, wid: 1, seats: 1.5 },
+    bus: { len: 4, wid: 1, seats: 2 },
+    bigbus: { len: 3, wid: 2, seats: 3 },
+  };
 
   const THEME_COUNT = 6;
   const DIRS = { R: [1, 0], L: [-1, 0], U: [0, -1], D: [0, 1] };
   const OPPOSITE = { R: 'L', L: 'R', U: 'D', D: 'U' };
-  const CAPACITY = { 2: 4, 3: 6 };
 
   // ---------- seeded randomness ----------
   function mulberry32(a) {
@@ -89,27 +103,71 @@
     holes: (x, y, W, H, rng) => rng() > 0.14,
   };
 
-  // ---------- difficulty curve ----------
-  function params(n) {
+  // ---------- difficulty ----------
+  const randInt = (rng, a, b) => a + Math.floor(rng() * (b - a + 1));
+
+  /** Level settings, rolled from the level's seed. Ranges widen over the first ~16 levels. */
+  function params(n, rng) {
+    const grow = Math.min(1, (n - 1) / 15);
+    const W = randInt(rng, 6 + Math.round(grow), 7 + Math.round(grow * 3));          // 6..10
+    const H = randInt(rng, Math.max(W + 1, 8 + Math.round(grow * 2)), 10 + Math.round(grow * 4)); // ..14
+    const slots = randInt(rng, Math.max(1, 4 - Math.floor(n / 4)), 6);                // 1..6
     return {
-      W: Math.min(9, 5 + Math.floor(n / 4)),
-      H: Math.min(11, 6 + Math.floor(n / 3)),
-      colors: Math.min(PALETTE.length, 2 + Math.ceil(n / 3)),
-      density: Math.min(0.95, 0.62 + n * 0.02),
-      longChance: Math.min(0.45, 0.2 + n * 0.015),
-      slots: 5,
-      // how many cars' passengers are mixed together in the queue at once
-      window: n <= 2 ? 1 : n <= 8 ? 2 : n <= 30 ? 3 : 4,
-      // how much of the queue the player can see
-      visible: Math.max(5, 10 - Math.floor(n / 5)),
+      W, H, slots,
+      // how many cars' passengers are mixed together in the line; window == slots means no spare spot
+      window: Math.max(1, slots - randInt(rng, 0, n < 6 ? 2 : 1)),
+      // seats in a small car; bigger vehicles carry more (see VEHICLES)
+      capacity: randInt(rng, 2, n < 4 ? 3 : 4),
+      // Always more colours than spots (2+ more after the intro levels), otherwise
+      // you can park one car of every colour and the line never gets stuck.
+      colors: Math.max(3, Math.min(PALETTE.length, slots + randInt(rng, n < 4 ? 1 : 2, n < 4 ? 2 : 4))),
+      density: 0.82 + rng() * 0.13,
+      vanChance: 0.2 + rng() * 0.15,
+      busChance: n < 3 ? 0 : 0.05 + rng() * 0.1,
+      bigChance: n < 5 ? 0 : 0.04 + rng() * 0.08,
+      visible: randInt(rng, 4, 9),
+      // maze candidates generated per level; the hardest one is kept
+      candidates: 4 + Math.round(grow * 6),
+      harden: n > 3, // the first levels stay gentle
     };
+  }
+
+  /** Peel free cars off in rounds; more rounds = longer chains of blockers. */
+  function analyze(cars, W, H) {
+    reindex(cars);
+    const occ = buildOcc(cars, W, H);
+    let remaining = cars.slice(), rounds = 0, initialFree = 0;
+    for (;;) {
+      const free = remaining.filter((c) => firstBlocker(c, W, H, occ).blocker < 0);
+      if (!free.length) break;
+      if (!rounds) initialFree = free.length;
+      rounds++;
+      for (const c of free) for (const [x, y] of carCells(c)) occ[y * W + x] = -1;
+      remaining = remaining.filter((c) => !free.includes(c));
+    }
+    return { rounds, initialFree, stuck: remaining.length };
+  }
+  const hardness = (a) => a.rounds * 4 - a.initialFree * 3;
+
+  /** Hill-climb car directions towards deeper blocking chains, never breaking solvability. */
+  function harden(cars, W, H, rng, steps) {
+    let cur = analyze(cars, W, H);
+    for (let i = steps; i > 0; i--) {
+      const c = cars[Math.floor(rng() * cars.length)];
+      c.dir = OPPOSITE[c.dir];
+      const a = analyze(cars, W, H);
+      if (a.stuck === 0 && hardness(a) >= hardness(cur)) cur = a;
+      else c.dir = OPPOSITE[c.dir];
+    }
+    return cur;
   }
 
   // ---------- grid helpers ----------
   function carCells(car) {
     const cells = [];
+    const wid = car.wid || 1;
     for (let i = 0; i < car.len; i++) {
-      cells.push(car.horiz ? [car.x + i, car.y] : [car.x, car.y + i]);
+      for (let j = 0; j < wid; j++) cells.push(car.horiz ? [car.x + i, car.y + j] : [car.x + j, car.y + i]);
     }
     return cells;
   }
@@ -120,19 +178,25 @@
     return occ;
   }
 
-  /** First car in front of `car` ({blocker:-1} when the way out is clear). */
+  /**
+   * Nearest car in front of `car` ({blocker:-1} when the way out is clear).
+   * A wide vehicle needs every one of its lanes to be clear.
+   */
   function firstBlocker(car, W, H, occ) {
     const [dx, dy] = DIRS[car.dir];
-    let fx = car.x, fy = car.y;
-    if (car.dir === 'R') fx = car.x + car.len - 1;
-    if (car.dir === 'D') fy = car.y + car.len - 1;
-    let x = fx + dx, y = fy + dy, dist = 0;
-    while (x >= 0 && x < W && y >= 0 && y < H) {
-      const o = occ[y * W + x];
-      if (o >= 0 && o !== car.id) return { blocker: o, dist };
-      x += dx; y += dy; dist++;
+    let best = { blocker: -1, dist: Infinity };
+    for (let j = 0; j < (car.wid || 1); j++) {
+      let x = car.horiz ? car.x : car.x + j, y = car.horiz ? car.y + j : car.y;
+      if (car.dir === 'R') x = car.x + car.len - 1;
+      if (car.dir === 'D') y = car.y + car.len - 1;
+      x += dx; y += dy;
+      for (let dist = 0; x >= 0 && x < W && y >= 0 && y < H && dist < best.dist; dist++, x += dx, y += dy) {
+        const o = occ[y * W + x];
+        if (o >= 0 && o !== car.id) { best = { blocker: o, dist }; break; }
+      }
     }
-    return { blocker: -1, dist };
+    if (best.blocker < 0) best.dist = car.horiz ? W : H;
+    return best;
   }
 
   function reindex(cars) { cars.forEach((c, i) => { c.id = i; }); }
@@ -150,6 +214,7 @@
     }
   }
 
+
   function makeSolvable(cars, W, H, rng) {
     const flipped = new Set();
     for (;;) {
@@ -164,13 +229,15 @@
   function fillCars(mask, W, H, p, rng) {
     const occ = new Int8Array(W * H);
     const cars = [];
-    const fits = (x, y, len, horiz) => {
-      for (let i = 0; i < len; i++) {
-        const cx = horiz ? x + i : x, cy = horiz ? y : y + i;
-        if (cx < 0 || cy < 0 || cx >= W || cy >= H) return false;
-        if (!mask[cy * W + cx] || occ[cy * W + cx]) return false;
-      }
-      return true;
+    const fits = (car) => carCells(car).every(([cx, cy]) =>
+      cx >= 0 && cy >= 0 && cx < W && cy < H && mask[cy * W + cx] && !occ[cy * W + cx]);
+    // which vehicle sizes to try at a cell, biggest first
+    const pickTypes = () => {
+      const r = rng();
+      if (r < p.bigChance) return ['bigbus', 'car'];
+      if (r < p.bigChance + p.busChance) return ['bus', 'van', 'car'];
+      if (r < p.bigChance + p.busChance + p.vanChance) return ['van', 'car'];
+      return ['car'];
     };
     const cells = [];
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (mask[y * W + x]) cells.push([x, y]);
@@ -180,13 +247,16 @@
         if (occ[y * W + x] || rng() > p.density) continue;
         let placed = false;
         for (const horiz of shuffle([true, false], rng)) {
-          for (const len of rng() < p.longChance ? [3, 2] : [2]) {
-            for (const off of shuffle([...Array(len).keys()], rng)) {
-              const sx = horiz ? x - off : x, sy = horiz ? y : y - off;
-              if (!fits(sx, sy, len, horiz)) continue;
-              const dir = horiz ? (rng() < 0.5 ? 'R' : 'L') : (rng() < 0.5 ? 'U' : 'D');
-              cars.push({ x: sx, y: sy, len, horiz, dir });
-              for (let i = 0; i < len; i++) occ[(horiz ? sy : sy + i) * W + (horiz ? sx + i : sx)] = 1;
+          for (const type of pickTypes()) {
+            const { len, wid } = VEHICLES[type];
+            const offsets = [];
+            for (let i = 0; i < len; i++) for (let j = 0; j < wid; j++) offsets.push([i, j]);
+            for (const [i, j] of shuffle(offsets, rng)) {
+              const car = { type, len, wid, horiz, x: horiz ? x - i : x - j, y: horiz ? y - j : y - i };
+              if (!fits(car)) continue;
+              car.dir = horiz ? (rng() < 0.5 ? 'R' : 'L') : (rng() < 0.5 ? 'U' : 'D');
+              cars.push(car);
+              for (const [cx, cy] of carCells(car)) occ[cy * W + cx] = 1;
               placed = true;
               break;
             }
@@ -246,29 +316,38 @@
 
   function generateLevel(n) {
     n = Math.max(1, Math.floor(n));
-    const p = params(n);
     const rng = mulberry32(hashInt(n));
+    const p = params(n, rng);
     const { W, H } = p;
     const names = Object.keys(SHAPES);
     const shapeName = n === 1 ? 'rect' : names[Math.floor(rng() * names.length)];
 
+    // Build several solvable mazes and keep the one with the deepest blocking chains.
     let best = null;
-    for (let attempt = 0; attempt < 40; attempt++) {
+    for (let attempt = 0, built = 0; attempt < 40 && built < p.candidates; attempt++) {
       const mask = [];
       for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) mask.push(SHAPES[shapeName](x, y, W, H, rng));
       const cells = mask.filter(Boolean).length;
       const cars = fillCars(mask, W, H, p, rng);
       makeSolvable(cars, W, H, rng);
-      if (!best || cars.length > best.cars.length) best = { mask, cars };
-      if (cars.length >= Math.max(5, Math.floor(cells * 0.25))) break;
+      if (cars.length < Math.max(6, Math.floor(cells * 0.3))) continue;
+      built++;
+      const score = hardness(harden(cars, W, H, rng, p.harden ? cars.length * 5 : 0)) + cars.length * 0.5;
+      if (!best || score > best.score) best = { mask, cars: cars.map((c) => ({ ...c })), score };
+    }
+    if (!best) {
+      const mask = new Array(W * H).fill(true);
+      const cars = fillCars(mask, W, H, p, rng);
+      makeSolvable(cars, W, H, rng);
+      best = { mask, cars };
     }
     const { mask, cars } = best;
-    reindex(cars);
+    const stats = analyze(cars, W, H); // also reindexes
 
     // balanced colour assignment
     const colors = shuffle([...PALETTE.keys()], rng).slice(0, p.colors);
     shuffle(cars.slice(), rng).forEach((c, i) => { c.color = colors[i % colors.length]; });
-    for (const c of cars) c.cap = CAPACITY[c.len];
+    for (const c of cars) c.cap = Math.round(p.capacity * VEHICLES[c.type].seats);
 
     const order = removalOrder(cars, W, H, rng);
     const queue = buildQueue(order, p.window, rng);
@@ -279,15 +358,19 @@
       shape: shapeName,
       themeIndex: (n - 1) % THEME_COUNT,
       slots: p.slots,
+      window: p.window,
       visible: p.visible,
+      capacity: p.capacity,
+      depth: stats.rounds,
       colors,
-      cars: cars.map((c) => ({ id: c.id, x: c.x, y: c.y, len: c.len, horiz: c.horiz, dir: c.dir, color: c.color, cap: c.cap })),
+      cars: cars.map((c) => ({ id: c.id, type: c.type, x: c.x, y: c.y, len: c.len, wid: c.wid, horiz: c.horiz, dir: c.dir, color: c.color, cap: c.cap })),
       queue,
       solution: order.map((c) => c.id),
     };
   }
 
-  const api = { PALETTE, THEME_COUNT, DIRS, SHAPES, params, generateLevel, firstBlocker, buildOcc, carCells };
+
+  const api = { PALETTE, VEHICLES, THEME_COUNT, DIRS, SHAPES, params, generateLevel, firstBlocker, buildOcc, carCells };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.TKLevels = api;
 })(typeof window !== 'undefined' ? window : globalThis);

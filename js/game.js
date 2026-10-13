@@ -54,9 +54,12 @@
     return '#' + ((1 << 24) | (ch(n >> 16) << 16) | (ch((n >> 8) & 255) << 8) | ch(n & 255)).toString(16).slice(1);
   }
 
-  // Vehicles are drawn facing right in a (len*100 x 100) box; CSS rotates them.
-  function vehicleSVG(kind, len, colorIdx, cap, filled) {
-    const w = len * 100;
+  // Vehicles are drawn facing right in a (len*100 x wid*100) box; CSS rotates them.
+  // The theme body is drawn for one lane and stretched across a wide vehicle.
+  function vehicleSVG(kind, car) {
+    const { len, cap, filled } = car, wid = car.wid || 1, colorIdx = car.color;
+    const w = len * 100, h = wid * 100;
+    if (kind === 'car' && car.type !== 'car' && car.type !== 'van') kind = 'bus';
     const c = PALETTE[colorIdx].hex, d = shade(c, -0.3), l = shade(c, 0.4);
     const glass = '#cfeaff';
     let body = '', chevron = null;
@@ -97,20 +100,24 @@
           <circle cx="${w - 12}" cy="24" r="5" fill="#fff7b0"/><circle cx="${w - 12}" cy="70" r="5" fill="#fff7b0"/>`;
         chevron = w - 24;
     }
-    // seats: two rows, filled from the front
-    const cols = cap / 2, x0 = 40, x1 = w - 64, step = (x1 - x0) / cols;
+    // a two-lane bus gets a centre roof divider
+    const deck = wid > 1 ? `<rect x="30" y="${h / 2 - 4}" width="${w - 90}" height="8" rx="4" fill="${d}" opacity=".45"/>` : '';
+    // seats: two rows per lane, filled from the front
+    const rows = 2 * wid, cols = Math.ceil(cap / rows), x0 = 40, x1 = w - 64;
+    const step = (x1 - x0) / cols, rowStep = (h - 36) / rows;
+    const r = Math.min(11, step * 0.36, rowStep * 0.36);
     let seats = '';
     for (let i = 0; i < cap; i++) {
-      const col = cols - 1 - Math.floor(i / 2), row = i % 2;
-      const cx = x0 + step * (col + 0.5), cy = row ? 63 : 31;
+      const col = cols - 1 - Math.floor(i / rows), row = i % rows;
+      const cx = x0 + step * (col + 0.5), cy = 18 + rowStep * (row + 0.5);
       seats += i < filled
-        ? `<circle cx="${cx}" cy="${cy}" r="11" fill="#fff" stroke="${d}" stroke-width="3"/><circle cx="${cx}" cy="${cy}" r="5" fill="${c}"/>`
-        : `<circle cx="${cx}" cy="${cy}" r="10" fill="rgba(0,0,0,.28)"/>`;
+        ? `<circle cx="${cx}" cy="${cy}" r="${r}" fill="#fff" stroke="${d}" stroke-width="3"/><circle cx="${cx}" cy="${cy}" r="${r * 0.45}" fill="${c}"/>`
+        : `<circle cx="${cx}" cy="${cy}" r="${r - 1}" fill="rgba(0,0,0,.28)"/>`;
     }
-    const glyph = `<text x="22" y="48" font-size="24" font-weight="700" text-anchor="middle" dominant-baseline="central" fill="#fff" stroke="rgba(0,0,0,.4)" stroke-width="3" paint-order="stroke">${PALETTE[colorIdx].glyph}</text>`;
+    const glyph = `<text x="22" y="${h / 2}" font-size="24" font-weight="700" text-anchor="middle" dominant-baseline="central" fill="#fff" stroke="rgba(0,0,0,.4)" stroke-width="3" paint-order="stroke">${PALETTE[colorIdx].glyph}</text>`;
     const arrow = chevron == null ? '' :
-      `<path d="M${chevron - 5} 36 L${chevron + 5} 47 L${chevron - 5} 58" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>`;
-    return `<svg viewBox="0 0 ${w} 100" preserveAspectRatio="none">${body}${seats}${glyph}${arrow}</svg>`;
+      `<path d="M${chevron - 5} ${h / 2 - 11} L${chevron + 5} ${h / 2} L${chevron - 5} ${h / 2 + 11}" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>`;
+    return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><g transform="scale(1,${wid})">${body}</g>${deck}${seats}${glyph}${arrow}</svg>`;
   }
 
   const HAIR = ['#5b3a29', '#1f1f1f', '#d9a441', '#a3471f', '#7d7d7d'];
@@ -158,19 +165,21 @@
   function computeGeo() {
     const sw = stage.clientWidth, sh = stage.clientHeight;
     const pad = 8, K = G.K;
-    const qh = Math.max(40, Math.min(58, sw / 9));
-    const slotW = Math.min((sw - 2 * pad) / K, 86);
+    const qh = Math.max(36, Math.min(48, sw / 10));
+    const slotW = Math.min((sw - 2 * pad) / K, 64);
     const slotsX0 = (sw - slotW * K) / 2;
-    const parkCell = Math.min(slotW * 0.5, 34) / 0.76; // cell length of a parked car
-    const slotH = parkCell * 3 + 16;
-    const queueY = pad;
-    const slotsY = queueY + qh + 10;
-    const lotTop = slotsY + slotH + 10;
-    const avail = Math.max(60, sh - lotTop - pad);
-    const cs = Math.min((sw - 2 * pad) / (G.W + 1.8), avail / (G.H + 1.8), 62);
-    const road = cs * 0.9;
+    const maxLen = Math.min(3, Math.max(...G.cars.map((c) => c.len)));
+    const parkCell = Math.min(slotW * 0.4, 20) / 0.76; // cell length of a parked car
+    const slotH = parkCell * maxLen + 8;
+    const queueY = 4;
+    const slotsY = queueY + qh + 6;
+    const lotTop = slotsY + slotH + 4;
+    const avail = Math.max(60, sh - lotTop - 4);
+    // the lot gets everything that is left; the ring road is 0.55 of a cell wide
+    const cs = Math.min((sw - 8) / (G.W + 1.1), avail / (G.H + 1.1), 72);
+    const road = cs * 0.55;
     const gx = (sw - G.W * cs) / 2;
-    const gy = lotTop + road + Math.max(0, avail - (G.H * cs + 2 * road)) * 0.35;
+    const gy = lotTop + road + Math.max(0, avail - (G.H * cs + 2 * road)) * 0.5;
     const stopW = qh * 0.62, moreW = 52;
     const qx0 = pad + stopW;
     const qs = (sw - 2 * pad - stopW - moreW - 6) / G.V;
@@ -184,20 +193,24 @@
     el.style.left = px(x); el.style.top = px(y); el.style.width = px(w); el.style.height = px(h);
   }
 
-  function T(cx, cy, a, s, len) {
-    return `translate(${cx - (len * geo.cs) / 2}px, ${cy - geo.cs / 2}px) rotate(${a}deg) scale(${s})`;
+  function T(cx, cy, a, s, car) {
+    return `translate(${cx - (car.len * geo.cs) / 2}px, ${cy - ((car.wid || 1) * geo.cs) / 2}px) rotate(${a}deg) scale(${s})`;
   }
   function carCenter(car) {
     const { gx, gy, cs } = geo;
     return car.horiz
-      ? [gx + (car.x + car.len / 2) * cs, gy + (car.y + 0.5) * cs]
-      : [gx + (car.x + 0.5) * cs, gy + (car.y + car.len / 2) * cs];
+      ? [gx + (car.x + car.len / 2) * cs, gy + (car.y + car.wid / 2) * cs]
+      : [gx + (car.x + car.wid / 2) * cs, gy + (car.y + car.len / 2) * cs];
   }
   function slotCenter(i) {
-    return [geo.slotsX0 + geo.slotW * (i + 0.5), geo.slotsY + geo.slotH / 2 - 4];
+    return [geo.slotsX0 + geo.slotW * (i + 0.5), geo.slotsY + geo.slotH / 2];
   }
-  function gridTransform(car) { return T(...carCenter(car), DIR_ANGLE[car.dir], 1, car.len); }
-  function slotTransform(car) { return T(...slotCenter(car.slot), -90, geo.parkScale, car.len); }
+  function gridTransform(car) { return T(...carCenter(car), DIR_ANGLE[car.dir], 1, car); }
+  function slotTransform(car) { return T(...slotCenter(car.slot), -90, parkScale(car), car); }
+  /** Parked vehicles shrink, and the biggest ones shrink further to fit their spot. */
+  function parkScale(car) {
+    return Math.min(geo.parkScale, (geo.slotH - 6) / (car.len * geo.cs), (geo.slotW - 8) / (car.wid * geo.cs));
+  }
   function queueTransform(r) {
     return `translate(${geo.qx0 + r * geo.qs + (geo.qs - geo.pw) / 2}px, ${geo.queueY + geo.qh - geo.ph - 3}px)`;
   }
@@ -225,7 +238,7 @@
   function positionCar(car) {
     if (car.state === 'gone') return;
     car.el.style.width = px(car.len * geo.cs);
-    car.el.style.height = px(geo.cs);
+    car.el.style.height = px(car.wid * geo.cs);
     car.el.style.transform = car.state === 'grid' ? gridTransform(car) : slotTransform(car);
   }
 
@@ -316,7 +329,7 @@
   }
 
   function renderCar(car) {
-    car.el.innerHTML = vehicleSVG(G.theme.vehicle, car.len, car.color, car.cap, car.filled);
+    car.el.innerHTML = vehicleSVG(G.theme.vehicle, car);
   }
 
   function updateHud() {
@@ -352,9 +365,9 @@
     const off = info.dist * geo.cs + geo.cs * 0.18;
     const duration = 240 + info.dist * 50;
     car.el.animate([
-      { transform: T(cx, cy, a, 1, car.len) },
-      { transform: T(cx + dx * off, cy + dy * off, a, 1, car.len), offset: 0.45 },
-      { transform: T(cx, cy, a, 1, car.len) },
+      { transform: T(cx, cy, a, 1, car) },
+      { transform: T(cx + dx * off, cy + dy * off, a, 1, car), offset: 0.45 },
+      { transform: T(cx, cy, a, 1, car) },
     ], { duration, easing: 'ease-in-out' });
     const blocker = G.cars[info.blocker].el;
     setTimeout(() => {
@@ -386,7 +399,7 @@
   function drive(car) {
     const g = G;
     const pts = exitPath(car);
-    const turn = geo.cs * 0.8;
+    const turn = geo.cs * 0.6;
     let ang = DIR_ANGLE[car.dir], dist = 0;
     const frames = [{ x: pts[0][0], y: pts[0][1], a: ang, d: 0 }];
     for (let i = 1; i < pts.length; i++) {
@@ -402,7 +415,7 @@
     }
     const last = frames.length - 1;
     const keyframes = frames.map((f, i) => ({
-      transform: T(f.x, f.y, f.a, i === last ? geo.parkScale : 1, car.len),
+      transform: T(f.x, f.y, f.a, i === last ? parkScale(car) : 1, car),
       offset: f.d / dist,
     }));
     car.el.classList.add('moving');
@@ -473,11 +486,11 @@
     car.state = 'leaving';
     g.slots[car.slot] = null;
     const [sx, sy] = slotCenter(car.slot);
-    const s = geo.parkScale;
+    const s = parkScale(car);
     const anim = car.el.animate([
-      { transform: T(sx, sy, -90, s, car.len), opacity: 1 },
-      { transform: T(sx, sy, -90, s * 1.12, car.len), opacity: 1, offset: 0.25 },
-      { transform: T(sx, sy - geo.slotH * 0.7, -90, s * 0.8, car.len), opacity: 0 },
+      { transform: T(sx, sy, -90, s, car), opacity: 1 },
+      { transform: T(sx, sy, -90, s * 1.12, car), opacity: 1, offset: 0.25 },
+      { transform: T(sx, sy - geo.slotH * 0.7, -90, s * 0.8, car), opacity: 0 },
     ], { duration: 420, easing: 'ease-in', fill: 'forwards' });
     anim.onfinish = () => {
       car.el.remove();
