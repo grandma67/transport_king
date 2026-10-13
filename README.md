@@ -13,12 +13,14 @@ A puzzle game for the browser with endless levels. Unblock the parking lot, park
 
 ## Levels
 
-Levels are generated from their number (seeded), so level 42 is always the same level 42, and there is no last level. Difficulty grows with the lot size, the number of colours, how many vehicles' passengers are mixed in the line, and how little of the line you can see.
+Levels are generated from their number (seeded), so level 42 is always the same level 42, and there is no last level. The seed rolls the lot size (up to 10×14), the number of parking spots (1–6), the number of colours (always more than the spots), the seats per vehicle, and how much of the line you can see. Each level builds several mazes and keeps the one with the longest chains of blocking vehicles.
+
+- **Vehicles:** car (1×2), van (1×3), long bus (1×4), and a two-lane big bus (2×3) that needs both lanes clear to leave. Bigger vehicles carry more passengers.
 
 - **Layouts:** rectangle, diamond, oval, plus, donut, hourglass, stairs, arch, aisles, islands, holes
 - **Themes:** City Rush (cars and people), Space Port (rockets and aliens), Harbor Hop (boats and penguins), Pet Express (trucks and cats), Candy Land (jelly cars and blobs), School Run (buses and kids)
 
-Every level is checked to be winnable: all vehicles can get out, seats match passengers, and the line is built from a real solution that never needs more than 4 of the 5 spots.
+Every level is checked to be winnable: all vehicles can get out, seats match passengers, and the line is built from a real solution that fits in the level's parking spots.
 
 ## Run locally
 
@@ -28,24 +30,41 @@ It is a static site with no build step. Open `index.html`, or serve the folder:
 python3 -m http.server 8000   # then open http://localhost:8000
 ```
 
-Run the tests, which play 500 levels with the game rules:
+## Install as an app
+
+Open the game in Chrome and choose **Install** in the address bar, or **Install app** in the game menu. It works offline after the first visit.
+
+The game is meant to share `user.github.io` with other games, so the manifest has its own `id` (`transport-king`), the service worker only controls this folder, its cache is named `transport-king-v<version>-<build>`, and saved progress uses `transport-king.*` keys. To release a new version, bump `VERSION` in `sw.js`. The deploy also stamps the commit SHA as the build.
+
+## Tests
+
+No dependencies are needed, only Node 22+ and, for the browser tests, Google Chrome (set `CHROME_PATH` if it is not found).
 
 ```sh
-node tests/levels.test.js 500
+npm test            # everything
+npm run test:unit   # generator, game rules, PWA config
+npm run test:e2e    # headless Chrome plays the game from a /transport_king/ subfolder
+LEVELS=1000 npm run test:unit   # check more levels
 ```
+
+- **Unit:** determinism, every level winnable within its spots, seats equal passengers, seeded ranges, colours outnumber spots, vehicles fit and never overlap, maze depth, blocking rules for wide buses, manifest and icons, cache naming, and cache cleanup that never touches other apps.
+- **End-to-end:** installability, offline play, layout proportions, blocked taps, parking, boarding, departing, the full-parking warning, losing, winning levels by real clicks, saved progress, themes, and big-bus rendering.
 
 ## Deploy to GitHub Pages
 
 1. Push this repo to GitHub on the `main` branch.
 2. In **Settings → Pages**, set **Source** to **GitHub Actions**.
-3. The workflow in `.github/workflows/pages.yml` runs the tests and publishes the site on every push to `main`.
+3. `.github/workflows/pages.yml` runs all tests on every push and pull request, and publishes to `https://<user>.github.io/<repo>/` after they pass on `main`.
 
 ## Project layout
 
 ```
-index.html         page shell and HUD
-css/style.css      styles
-js/levels.js       seeded level generator (pure logic, also used by the tests)
-js/game.js         rendering, animation, input, and game rules
-tests/             solvability tests
+index.html             page shell and HUD
+css/style.css          styles
+js/levels.js           seeded level generator (pure logic, also used by the tests)
+js/game.js             rendering, animation, input, and game rules
+sw.js                  service worker (offline cache)
+manifest.webmanifest   app manifest
+icons/                 app icons
+tests/                 unit and end-to-end tests
 ```

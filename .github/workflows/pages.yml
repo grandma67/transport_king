@@ -1,32 +1,47 @@
-name: Deploy to GitHub Pages
+name: Test and deploy
 
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: pages
-  cancel-in-progress: true
 
 jobs:
-  deploy:
+  test:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Check that levels are solvable
-        run: node tests/levels.test.js 500
+      - name: Unit tests (generator, rules, PWA config)
+        run: node --test tests/levels.test.js tests/pwa.test.js
+        env:
+          LEVELS: 500
+      - name: End-to-end tests (headless Chrome)
+        run: node --test tests/e2e.test.mjs
+        env:
+          CHROME_PATH: /usr/bin/google-chrome
+
+  deploy:
+    needs: test
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    concurrency:
+      group: pages
+      cancel-in-progress: true
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
       - name: Stamp service worker cache with the build
         run: sed -i "s/const BUILD = 'dev';/const BUILD = '${GITHUB_SHA::7}';/" sw.js && grep -n "const BUILD" sw.js
       - uses: actions/configure-pages@v5
