@@ -555,6 +555,7 @@
   // ---------- auto solver ----------
   const SOLVE_LIMIT = 10000;
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  let autoPace = 1; // scales the playback pauses; tests turn it down
   let solving = null; // AbortController of the running search
 
   /** Nothing is driving, boarding or about to leave. */
@@ -625,20 +626,20 @@
     for (let i = 0; i < moves.length && live(); i++) {
       bar.innerHTML = `&#129302; Solving… move ${i + 1} of ${moves.length} <b>Stop</b>`;
       await untilSettled(g);
-      await wait(i ? 450 : 150);
+      await wait((i ? 450 : 150) * autoPace);
       if (!live()) break;
       const car = g.cars[moves[i]];
       const [cx, cy] = carCenter(car);
       hand.classList.add('show');
       hand.style.transform = `translate(${cx - 12}px, ${cy - 4}px)`;
       car.el.classList.add('hint');
-      await wait(850);
+      await wait(850 * autoPace);
       if (!live()) { car.el.classList.remove('hint'); break; }
       hand.classList.add('tap');
-      await wait(160);
+      await wait(160 * autoPace);
       car.el.classList.remove('hint');
       tapCar(car);
-      await wait(220);
+      await wait(220 * autoPace);
       hand.classList.remove('tap');
       if (car.state === 'grid') break; // the board is not what we planned for
     }
@@ -752,6 +753,6 @@
     startLevel(menuLevel);
     showMenu();
     // Used by automated browser tests: index.html#debug
-    if (location.hash === '#debug') window.TKDebug = { game: () => G, startLevel };
+    if (location.hash === '#debug') window.TKDebug = { game: () => G, startLevel, setAutoPace: (f) => { autoPace = f; } };
   });
 })();

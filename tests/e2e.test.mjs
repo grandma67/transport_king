@@ -425,20 +425,29 @@ e2e('the top bar fits on a small phone', async () => {
   }
 });
 
-e2e('the solve button finds a solution and plays it to a win', { timeout: 240000 }, async () => {
-  await startLevel(1);
-  // the player made a move first; the solver starts from the current board
-  await js(`(() => { const g = TKDebug.game(); g.cars[g.data.solution[0]].el.click(); })(), true`);
-  await js(`document.getElementById('btn-solve').click(), true`);
-  await until(`!!document.querySelector('.autobar') && !!document.querySelector('.car.hint')`, 15000);
-  assert.ok(await js(`document.getElementById('btn-solve').classList.contains('on')`));
-  // the player's own taps are ignored while it plays
-  assert.equal(await js(`(() => { const g = TKDebug.game();
-    const c = g.cars.find((c) => c.state === 'grid' && !c.el.classList.contains('hint') && TKLevels.firstBlocker(c, g.W, g.H, g.occ).blocker < 0);
-    if (!c) return 'grid'; c.el.click(); return c.state; })()`), 'grid');
-  await until(`!!document.querySelector('[data-act=next]')`, 220000); // it plays slowly on purpose
-  assert.equal(await js(`TKDebug.game().cars.filter((c) => c.state !== 'gone').length`), 0);
-  assert.equal(await js(`!!document.querySelector('.autobar')`), false);
+e2e('the solve button finds a solution and plays it to a win', { timeout: 60000 }, async () => {
+  // it plays slowly on purpose; here only the logic matters, so skip the pauses and run animations fast
+  await send('Animation.enable');
+  await send('Animation.setPlaybackRate', { playbackRate: 20 });
+  await js(`TKDebug.setAutoPace(0), true`);
+  try {
+    await startLevel(3);
+    // the player made a move first; the solver starts from the current board
+    await js(`(() => { const g = TKDebug.game(); g.cars[g.data.solution[0]].el.click(); })(), true`);
+    await js(`document.getElementById('btn-solve').click(), true`);
+    await until(`!!document.querySelector('.autobar')`, 15000);
+    assert.ok(await js(`document.getElementById('btn-solve').classList.contains('on')`));
+    // the player's own taps are ignored while it plays
+    assert.equal(await js(`(() => { const g = TKDebug.game();
+      const c = g.cars.find((c) => c.state === 'grid' && !c.el.classList.contains('hint') && TKLevels.firstBlocker(c, g.W, g.H, g.occ).blocker < 0);
+      if (!c) return 'grid'; c.el.click(); return c.state; })()`), 'grid');
+    await until(`!!document.querySelector('[data-act=next]')`, 50000);
+    assert.equal(await js(`TKDebug.game().cars.filter((c) => c.state !== 'gone').length`), 0);
+    assert.equal(await js(`!!document.querySelector('.autobar')`), false);
+  } finally {
+    await js(`TKDebug.setAutoPace(1), true`);
+    await send('Animation.setPlaybackRate', { playbackRate: 1 });
+  }
 });
 
 e2e('the stop button hands control back to the player', async () => {
