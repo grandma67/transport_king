@@ -123,7 +123,10 @@ after(async () => {
   if (profile) fs.rmSync(profile, { recursive: true, force: true, maxRetries: 3 });
 });
 
-const e2e = (name, fn) => test(name, { skip: !chromePath && 'Chrome not found (set CHROME_PATH)' }, fn);
+const e2e = (name, opts, fn) => {
+  if (!fn) [fn, opts] = [opts, {}];
+  return test(name, { ...opts, skip: !chromePath && 'Chrome not found (set CHROME_PATH)' }, fn);
+};
 
 e2e('loads with the menu open and no errors', async () => {
   assert.equal(await js(`document.title`), 'Transport King');
