@@ -9,20 +9,21 @@
   'use strict';
 
   const TK = window.TKLevels;
+  const sfx = window.TKSound;
   const { PALETTE, DIRS } = TK;
 
   const THEMES = [
-    { name: 'City Rush', vehicle: 'car', passenger: 'person',
+    { name: 'City Rush', sound: 'city', vehicle: 'car', passenger: 'person',
       bg: 'linear-gradient(180deg,#a8d8ff,#e6f4ff)', road: '#2d323a', tile: '#4b525e', line: 'rgba(255,255,255,.22)', ui: '#12304d' },
-    { name: 'Space Port', vehicle: 'rocket', passenger: 'alien',
+    { name: 'Space Port', sound: 'space', vehicle: 'rocket', passenger: 'alien',
       bg: 'radial-gradient(circle at 30% 15%,#3a3f8f 0%,#141838 55%,#070818 100%)', road: '#0d1030', tile: '#252a63', line: 'rgba(150,170,255,.25)', ui: '#eef1ff' },
-    { name: 'Harbor Hop', vehicle: 'boat', passenger: 'penguin',
+    { name: 'Harbor Hop', sound: 'harbor', vehicle: 'boat', passenger: 'penguin',
       bg: 'linear-gradient(180deg,#8fdcff,#dff6ff)', road: '#b98a52', tile: '#2c87bd', line: 'rgba(255,255,255,.25)', ui: '#0b3954' },
-    { name: 'Pet Express', vehicle: 'truck', passenger: 'cat',
+    { name: 'Pet Express', sound: 'pets', vehicle: 'truck', passenger: 'cat',
       bg: 'linear-gradient(180deg,#c9f29b,#f4fde8)', road: '#8d6a43', tile: '#5f9e45', line: 'rgba(255,255,255,.22)', ui: '#24461a' },
-    { name: 'Candy Land', vehicle: 'jelly', passenger: 'blob',
+    { name: 'Candy Land', sound: 'candy', vehicle: 'jelly', passenger: 'blob',
       bg: 'linear-gradient(180deg,#ffc6e5,#fff0f8)', road: '#7a3b69', tile: '#a05590', line: 'rgba(255,255,255,.25)', ui: '#5a1846' },
-    { name: 'School Run', vehicle: 'bus', passenger: 'person',
+    { name: 'School Run', sound: 'school', vehicle: 'bus', passenger: 'person',
       bg: 'linear-gradient(180deg,#ffe0a3,#fff7e6)', road: '#3a3a3a', tile: '#5a5a5a', line: 'rgba(255,230,120,.35)', ui: '#4a3000' },
   ];
 
@@ -287,6 +288,7 @@
     G.occ = TK.buildOcc(G.cars, G.W, G.H);
     store.set('transport-king.level', n);
     applyTheme(theme);
+    sfx.setTheme(theme.sound);
     buildStage();
     layout();
     updateHud();
@@ -344,9 +346,10 @@
   function onCarTap(car) {
     if (G.over || car.state !== 'grid') return;
     const info = TK.firstBlocker(car, G.W, G.H, G.occ);
-    if (info.blocker >= 0) { bump(car, info); return; }
+    if (info.blocker >= 0) { sfx.play('bump'); bump(car, info); return; }
     const slot = G.slots.indexOf(null);
     if (slot < 0) {
+      sfx.play('nospot');
       toast('No free parking spot!');
       for (const s of G.els.slots) { s.classList.remove('warn'); void s.offsetWidth; s.classList.add('warn'); }
       return;
@@ -356,6 +359,7 @@
     car.state = 'arriving';
     car.parkedAt = ++G.parkCounter;
     for (const [x, y] of TK.carCells(car)) G.occ[y * G.W + x] = -1;
+    sfx.play('select');
     drive(car);
   }
 
@@ -420,10 +424,9 @@
       offset: f.d / dist,
     }));
     car.el.classList.add('moving');
-    const anim = car.el.animate(keyframes, {
-      duration: 220 + dist / Math.max(0.7, geo.cs * 0.022),
-      easing: 'ease-in-out',
-    });
+    const duration = 220 + dist / Math.max(0.7, geo.cs * 0.022);
+    const anim = car.el.animate(keyframes, { duration, easing: 'ease-in-out' });
+    sfx.play('drive', { dur: duration / 1000 });
     anim.onfinish = () => {
       if (g.dead) return;
       car.el.classList.remove('moving');
@@ -477,6 +480,7 @@
       el.remove();
       if (g.dead) return;
       car.filled++;
+      sfx.play('board', { seat: car.filled - 1 });
       renderCar(car);
       if (car.filled === car.cap) setTimeout(() => { if (!g.dead) depart(car); }, 160);
     };
@@ -484,6 +488,7 @@
 
   function depart(car) {
     const g = G;
+    sfx.play('full');
     car.state = 'leaving';
     g.slots[car.slot] = null;
     const [sx, sy] = slotCenter(car.slot);
@@ -518,6 +523,7 @@
         <p>Every passenger made it home.</p>
         <button class="btn" data-act="next">Next level &rarr;</button>
         <button class="btn secondary" data-act="menu">Menu</button>`);
+      sfx.play('win');
       confetti();
     }, 350);
   }
@@ -530,6 +536,7 @@
     g.over = true;
     const front = g.qEls.get(g.head);
     if (front) front.classList.add('sad');
+    sfx.play('lose');
     setTimeout(() => {
       if (G !== g) return;
       const name = PALETTE[g.queue[g.head]].name;
@@ -605,6 +612,14 @@
   });
   $('#btn-menu').addEventListener('click', showMenu);
   $('#btn-restart').addEventListener('click', () => startLevel(G.n));
+  const soundBtn = $('#btn-sound');
+  const showSound = () => {
+    soundBtn.textContent = sfx.muted ? '\u{1F507}' : '\u{1F50A}';
+    soundBtn.setAttribute('aria-label', sfx.muted ? 'Unmute sound' : 'Mute sound');
+    soundBtn.setAttribute('aria-pressed', String(sfx.muted));
+  };
+  soundBtn.addEventListener('click', () => { sfx.toggle(); showSound(); });
+  showSound();
   window.addEventListener('resize', layout);
 
   // ---------- installable app ----------

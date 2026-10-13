@@ -30,6 +30,21 @@ It is a static site with no build step. Open `index.html`, or serve the folder:
 python3 -m http.server 8000   # then open http://localhost:8000
 ```
 
+## Sounds
+
+All sound effects are synthesised live with the Web Audio API, so there are no audio files and they work offline. Each theme has its own set:
+
+| Theme | Vehicle tapped | Driving | Passenger boards |
+|---|---|---|---|
+| City Rush | car horn beep-beep | engine rev | soft pop |
+| Space Port | laser blip | rocket whoosh | sci-fi bloop |
+| Harbor Hop | fog horn | splashing water | penguin squeak |
+| Pet Express | truck honk | putt-putt engine | meow |
+| Candy Land | boing | wobbly jelly | sparkly bell |
+| School Run | two-tone bus horn | diesel rumble | school bell |
+
+Boarding sounds climb a pentatonic scale as seats fill. A blocked tap thuds, a full vehicle chimes as it leaves, and winning and losing each have a jingle. The 🔊 button in the top bar mutes sound, and the game remembers the choice.
+
 ## Install as an app
 
 Open the game in Chrome and choose **Install** in the address bar, or **Install app** in the game menu. It works offline after the first visit.
