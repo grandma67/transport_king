@@ -252,9 +252,28 @@
     return muted;
   }
 
-  // Browsers only start audio after a user gesture.
+  // iOS silences Web Audio with the ring/silent switch unless the page asks
+  // for media playback (Safari 17+). The in-game mute button still works.
+  try { if (root.navigator && root.navigator.audioSession) root.navigator.audioSession.type = 'playback'; } catch (e) { /* ignore */ }
+
+  // Browsers only start audio inside a user gesture. A touch pointerdown is
+  // not one, so listen to the events that are and keep listening until the
+  // context is actually running. Playing a silent buffer unlocks older iOS.
+  function unlock() {
+    if (muted || !ensure()) return;
+    try {
+      const src = ctx.createBufferSource();
+      src.buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
+      src.connect(ctx.destination);
+      src.start(0);
+    } catch (e) { /* ignore */ }
+    if (ctx.state === 'running') {
+      for (const ev of UNLOCK_EVENTS) root.document.removeEventListener(ev, unlock, true);
+    }
+  }
+  const UNLOCK_EVENTS = ['pointerup', 'touchend', 'mousedown', 'keydown', 'click'];
   if (root.document) {
-    root.document.addEventListener('pointerdown', () => { if (!muted) ensure(); }, { once: true, capture: true });
+    for (const ev of UNLOCK_EVENTS) root.document.addEventListener(ev, unlock, true);
   }
 
   root.TKSound = {

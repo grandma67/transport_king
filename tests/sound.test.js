@@ -46,16 +46,24 @@ function fakeAudio() {
   return { AudioContext, log };
 }
 
-function load({ stored = null, audio = true } = {}) {
+function load({ stored = null, audio = true, dom = false } = {}) {
   const fake = fakeAudio();
   const storage = new Map(stored == null ? [] : [['transport-king.muted', stored]]);
   const win = {
     localStorage: { getItem: (k) => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, String(v)) },
   };
   if (audio) win.AudioContext = fake.AudioContext;
+  const listeners = new Map();
+  if (dom) {
+    win.navigator = { audioSession: { type: 'auto' } };
+    win.document = {
+      addEventListener: (ev, fn) => listeners.set(ev, fn),
+      removeEventListener: (ev, fn) => { if (listeners.get(ev) === fn) listeners.delete(ev); },
+    };
+  }
   win.window = win;
   vm.runInNewContext(src, win);
-  return { S: win.TKSound, log: fake.log, storage };
+  return { S: win.TKSound, log: fake.log, storage, win, listeners };
 }
 
 test('every theme has its own select, drive and board sounds', () => {
@@ -159,4 +167,23 @@ test('sound.js is loaded by the page and precached for offline play', () => {
   const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
   assert.ok(html.indexOf('js/sound.js') > 0 && html.indexOf('js/sound.js') < html.indexOf('js/game.js'), 'sound.js loads before game.js');
   assert.match(fs.readFileSync(path.join(root, 'sw.js'), 'utf8'), /'\.\/js\/sound\.js'/);
+});
+
+test('audio unlocks on a real gesture (touchend, not touch pointerdown) and plays through the iOS silent switch', () => {
+  const { log, win, listeners } = load({ dom: true });
+  assert.equal(win.navigator.audioSession.type, 'playback');
+  assert.ok(!listeners.has('pointerdown'), 'touch pointerdown is not a user activation');
+  for (const ev of ['touchend', 'pointerup', 'click']) assert.ok(listeners.has(ev), ev);
+  listeners.get('touchend')();
+  assert.equal(log.contexts, 1);
+  assert.ok(log.resumed >= 1, 'context resumed inside the gesture');
+  assert.ok(log.sources.some((s) => s.kind === 'noise' && s.out && s.out.dest), 'silent buffer played to unlock iOS');
+  assert.equal(listeners.size, 0, 'listeners removed once audio is running');
+});
+
+test('muted players do not unlock audio on tap', () => {
+  const { log, listeners } = load({ dom: true, stored: '1' });
+  listeners.get('click')();
+  assert.equal(log.contexts, 0);
+  assert.ok(listeners.size > 0, 'still waiting to unlock after unmuting');
 });

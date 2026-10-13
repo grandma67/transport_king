@@ -1,6 +1,6 @@
 {
   "name": "transport-king",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "private": true,
   "description": "Puzzle game: unblock the lot, park the right vehicle, send every passenger home.",
   "scripts": {
