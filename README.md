@@ -43,13 +43,18 @@ All sound effects are synthesised live with the Web Audio API, so there are no a
 | Candy Land | boing | wobbly jelly | sparkly bell |
 | School Run | two-tone bus horn | diesel rumble | school bell |
 
-Boarding sounds climb a pentatonic scale as seats fill. A blocked tap thuds, a full vehicle chimes as it leaves, and winning and losing each have a jingle. The 🔊 button in the top bar mutes sound, and the game remembers the choice.
+Boarding sounds climb a pentatonic scale as seats fill. A blocked tap thuds, a full vehicle chimes as it leaves, and winning and losing each have a jingle. 
+Each theme also has its own soft background music loop. The 🎵 button in the top bar turns music on and off; 🔊 mutes everything. On iPhone, sound plays even with the silent switch on (use 🔊 to mute).
+
+## Saved progress
+
+The game remembers your level, the highest level unlocked, and the sound and music settings. They are saved in the browser's IndexedDB (database `transport-king`), with a backup copy in `localStorage` under `transport-king.save`. After you win a level the game asks the browser to keep this data permanently (`navigator.storage.persist()`).
 
 ## Install as an app
 
 Open the game in Chrome and choose **Install** in the address bar, or **Install app** in the game menu. It works offline after the first visit.
 
-The game is meant to share `user.github.io` with other games, so the manifest has its own `id` (`transport-king`), the service worker only controls this folder, its cache is named `transport-king-v<version>-<build>`, and saved progress uses `transport-king.*` keys. To release a new version, bump `VERSION` in `sw.js`. The deploy also stamps the commit SHA as the build.
+The game is meant to share `user.github.io` with other games, so the manifest has its own `id` (`transport-king`), the service worker only controls this folder, its cache is named `transport-king-v<version>-<build>`, and saved progress only ever reads, writes or deletes the `transport-king` database and `transport-king.*` keys, never other games' data. To release a new version, bump `VERSION` in `sw.js`. The deploy also stamps the commit SHA as the build.
 
 ## Tests
 
@@ -57,13 +62,13 @@ No dependencies are needed, only Node 24+ (see `.nvmrc`) and, for the browser te
 
 ```sh
 npm test            # everything
-npm run test:unit   # generator, game rules, PWA config
+npm run test:unit   # generator, game rules, PWA config, storage, sound
 npm run test:e2e    # headless Chrome plays the game from a /transport_king/ subfolder
 LEVELS=1000 npm run test:unit   # check more levels
 ```
 
-- **Unit:** determinism, every level winnable within its spots, seats equal passengers, seeded ranges, colours outnumber spots, vehicles fit and never overlap, maze depth, blocking rules for wide buses, manifest and icons, cache naming, and cache cleanup that never touches other apps.
-- **End-to-end:** installability, offline play, layout proportions, blocked taps, parking, boarding, departing, the full-parking warning, losing, winning levels by real clicks, saved progress, themes, and big-bus rendering.
+- **Unit:** determinism, every level winnable within its spots, seats equal passengers, seeded ranges, colours outnumber spots, vehicles fit and never overlap, maze depth, blocking rules for wide buses, manifest and icons, cache naming, cache cleanup that never touches other apps, saved-data validation and migration, sound effects, music, and audio unlocking.
+- **End-to-end:** installability, offline play, layout proportions, blocked taps, parking, boarding, departing, the full-parking warning, losing, winning levels by real clicks, saved progress in IndexedDB across reloads, other games' data left alone, sound and music buttons, the top bar on a small phone, themes, and big-bus rendering.
 
 ## Deploy to GitHub Pages
 

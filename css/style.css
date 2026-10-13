@@ -28,6 +28,7 @@ button { font: inherit; }
 /* ---------- HUD ---------- */
 #hud { display: flex; align-items: center; gap: 6px; padding: 10px 10px 4px; padding-top: max(10px, env(safe-area-inset-top)); }
 .hud-btn {
+  position: relative;
   width: 38px; height: 38px; flex: none;
   border: none; border-radius: 12px;
   background: rgba(255, 255, 255, 0.8); color: #12304d;
@@ -35,6 +36,12 @@ button { font: inherit; }
   box-shadow: 0 3px 0 rgba(0, 0, 0, 0.18);
 }
 .hud-btn:active { transform: translateY(2px); box-shadow: 0 1px 0 rgba(0, 0, 0, 0.18); }
+.hud-btn.off { opacity: 0.55; }
+.hud-btn.off::after {
+  content: ''; position: absolute; left: 7px; right: 7px; top: 50%;
+  height: 3px; border-radius: 2px; background: #d33;
+  transform: rotate(-45deg);
+}
 .hud-mid { flex: 1; min-width: 0; }
 #hud-level { font-weight: 800; font-size: 19px; line-height: 1.1; }
 #hud-theme { font-size: 12px; opacity: 0.75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -170,3 +177,10 @@ button { font: inherit; }
 @keyframes sad { 50% { filter: drop-shadow(0 0 8px #ff2d2d); } }
 @keyframes warn { 50% { border-color: #ff4d4d; background: rgba(255, 60, 60, 0.35); } }
 @keyframes fall { to { transform: translateY(110vh) rotate(720deg); } }
+
+/* narrow phones: fit four HUD buttons */
+@media (max-width: 360px) {
+  #hud { gap: 4px; padding-left: 6px; padding-right: 6px; }
+  .hud-btn { width: 34px; height: 34px; font-size: 18px; }
+  #hud-stats { gap: 6px; }
+}

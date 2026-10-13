@@ -48,9 +48,13 @@ async function until(expression, timeout = 10000) {
     await sleep(50);
   }
 }
+let loads = 0;
+/** Loads the page fresh. A unique query makes it a real load, not a same-page hash change. */
 async function open(url) {
-  await send('Page.navigate', { url });
-  await until(`document.readyState === 'complete' && !!window.TKDebug`);
+  const u = new URL(url);
+  u.searchParams.set('load', String(++loads));
+  await send('Page.navigate', { url: u.href });
+  await until(`location.search === '?load=${loads}' && document.readyState === 'complete' && !!window.TKDebug`);
 }
 const startLevel = (n) => js(`TKDebug.startLevel(${n}), true`);
 
@@ -280,8 +284,8 @@ e2e('winning saves progress and unlocks the next level', async () => {
   await startLevel(2);
   const r = await js(PLAY);
   assert.ok(r.won);
-  assert.ok(Number(await js(`localStorage.getItem('transport-king.max')`)) >= 3);
-  assert.equal(await js(`localStorage.getItem('transport-king.level')`), '3');
+  assert.ok(await js(`TKStore.get('max')`) >= 3);
+  assert.equal(await js(`TKStore.get('level')`), 3);
   await js(`document.querySelector('[data-act=next]').click(), true`);
   assert.equal(await js(`TKDebug.game().n`), 3);
   await js(`document.getElementById('btn-menu').click(), true`);
@@ -337,8 +341,85 @@ e2e('the sound button mutes, and the choice survives a reload', async () => {
   assert.equal(await js(`TKSound.muted`), true);
   assert.equal(await js(`TKSound.play('select')`), false);
   await js(`document.getElementById('btn-sound').click(), true`);
-  assert.equal(await js(`localStorage.getItem('transport-king.muted')`), '0');
+  assert.equal(await js(`JSON.parse(localStorage.getItem('transport-king.save')).muted`), false);
   assert.equal(await js(`TKSound.play('select')`), true);
+});
+
+e2e('the music button turns music off and on, and the choice survives a reload', async () => {
+  await js(`TKSound.setMuted(false), TKSound.setMusic(true), true`);
+  await js(`document.body.click(), true`); // a user gesture unlocks audio
+  await until(`TKSound.musicPlaying`);
+  const btn = `document.getElementById('btn-music')`;
+  await js(`${btn}.click(), true`);
+  assert.equal(await js(`TKSound.musicPlaying`), false);
+  assert.equal(await js(`${btn}.getAttribute('aria-pressed')`), 'true');
+  assert.equal(await js(`${btn}.classList.contains('off')`), true);
+  await open(`${origin}${BASE}#debug`);
+  assert.equal(await js(`TKSound.music`), false);
+  assert.equal(await js(`${btn}.getAttribute('aria-label')`), 'Turn music on');
+  await js(`${btn}.click(), true`);
+  assert.equal(await js(`TKSound.musicPlaying`), true);
+});
+
+// Reads this game's saved state straight from IndexedDB.
+const fromDB = `new Promise((ok, no) => { const r = indexedDB.open('transport-king'); r.onerror = no;
+  r.onsuccess = () => { const q = r.result.transaction('save').objectStore('save').get('state');
+    q.onsuccess = () => { r.result.close(); ok(q.result); }; q.onerror = no; }; })`;
+
+e2e('the level and preferences are kept in IndexedDB and survive a reload', async () => {
+  await js(`TKStore.set({ max: 9, level: 7, muted: true, music: false }), true`);
+  await until(`${fromDB}.then((s) => s && s.level === 7)`);
+  assert.deepEqual(await js(`${fromDB}.then(({ level, max, muted, music }) => ({ level, max, muted, music }))`),
+    { level: 7, max: 9, muted: true, music: false });
+  // Even if the localStorage copy is lost, the database brings everything back.
+  await js(`localStorage.removeItem('transport-king.save'), true`);
+  await open(`${origin}${BASE}#debug`);
+  assert.equal(await js(`TKDebug.game().n`), 7);
+  assert.match(await js(`document.querySelector('.lvl-pick span').textContent`), /Level 7/);
+  assert.equal(await js(`TKSound.muted`), true);
+  assert.equal(await js(`TKSound.music`), false);
+  assert.equal(await js(`JSON.parse(localStorage.getItem('transport-king.save')).level`), 7, 'backup copy restored');
+  await js(`TKStore.set({ muted: false, music: true }), true`);
+});
+
+e2e('the player\'s level is remembered after playing and reloading', async () => {
+  await startLevel(4);
+  await open(`${origin}${BASE}#debug`);
+  assert.equal(await js(`TKDebug.game().n`), 4);
+  assert.match(await js(`document.querySelector('.lvl-pick span').textContent`), /Level 4/);
+});
+
+e2e('other games on the same site keep their saved data', async () => {
+  await js(`localStorage.setItem('other-game.level', '42'), true`);
+  await js(`new Promise((ok) => { const r = indexedDB.open('other-game', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('s');
+    r.onsuccess = () => { const tx = r.result.transaction('s', 'readwrite'); tx.objectStore('s').put('mine', 'k');
+      tx.oncomplete = () => { r.result.close(); ok(); }; }; })`);
+  await open(`${origin}${BASE}#debug`);
+  await js(`TKStore.set({ level: 2 }), TKSound.toggle(), TKSound.toggle(), true`);
+  await open(`${origin}${BASE}#debug`);
+  assert.equal(await js(`localStorage.getItem('other-game.level')`), '42');
+  assert.equal(await js(`new Promise((ok) => { const r = indexedDB.open('other-game');
+    r.onsuccess = () => { const q = r.result.transaction('s').objectStore('s').get('k'); q.onsuccess = () => ok(q.result); }; })`), 'mine');
+  const ours = await js(`Object.keys(localStorage).filter((k) => k !== 'other-game.level')`);
+  assert.deepEqual(ours, ['transport-king.save']);
+  const dbs = await js(`indexedDB.databases().then((d) => d.map((x) => x.name).sort())`);
+  assert.deepEqual(dbs, ['other-game', 'transport-king']);
+});
+
+e2e('the top bar fits on a small phone', async () => {
+  await send('Emulation.setDeviceMetricsOverride', { width: 320, height: 640, deviceScaleFactor: 2, mobile: true });
+  try {
+    const r = await js(`(() => {
+      const hud = document.getElementById('hud').getBoundingClientRect();
+      const kids = [...document.getElementById('hud').children].map((e) => e.getBoundingClientRect());
+      return { overflow: document.getElementById('hud').scrollWidth > hud.width + 1,
+               offscreen: kids.some((k) => k.right > innerWidth + 0.5 || k.left < -0.5) };
+    })()`);
+    assert.deepEqual(r, { overflow: false, offscreen: false });
+  } finally {
+    await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+  }
 });
 
 e2e('no page errors during the whole run', () => {

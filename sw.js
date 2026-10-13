@@ -8,7 +8,7 @@
  * BUILD is stamped with the commit SHA by the deploy workflow.
  */
 const APP_ID = 'transport-king';
-const VERSION = '1.3.1';
+const VERSION = '1.4.0';
 const BUILD = 'dev';
 const CACHE = `${APP_ID}-v${VERSION}-${BUILD}`;
 
@@ -17,6 +17,7 @@ const ASSETS = [
   './index.html',
   './css/style.css',
   './js/levels.js',
+  './js/storage.js',
   './js/sound.js',
   './js/game.js',
   './manifest.webmanifest',

@@ -134,9 +134,12 @@ test('service worker ignores requests outside its scope', async () => {
   assert.equal(await inside, 'cached');
 });
 
-test('saved progress uses namespaced storage keys (the origin is shared)', () => {
-  const src = read('js/game.js');
-  const keys = [...src.matchAll(/store\.(?:get|set)\('([^']+)'/g)].map((m) => m[1]);
-  assert.ok(keys.length > 0);
-  for (const k of keys) assert.ok(k.startsWith(manifest.id + '.'), `storage key ${k} is not namespaced`);
+test('saved progress only uses this game\'s own storage (the origin is shared)', () => {
+  const src = read('js/storage.js');
+  assert.match(src, new RegExp(`const NS = '${manifest.id}'`));
+  assert.match(src, /indexedDB\.open\(DB_NAME/);
+  assert.doesNotMatch(src, /localStorage\.clear|deleteDatabase|indexedDB\.databases/, 'never wipes shared storage');
+  for (const f of ['js/game.js', 'js/sound.js', 'js/levels.js']) {
+    assert.doesNotMatch(read(f), /localStorage|indexedDB/, `${f} must go through storage.js`);
+  }
 });

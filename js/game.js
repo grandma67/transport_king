@@ -39,14 +39,13 @@
   let G = null;   // current game
   let geo = null; // current layout measurements
 
-  // ---------- storage (best effort) ----------
-  // Keys are namespaced: other games share this origin on GitHub Pages.
-  const store = {
-    get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
-    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* ignore */ } },
-  };
-  let maxLevel = Math.max(1, store.get('transport-king.max', 1) | 0);
-  let menuLevel = Math.min(maxLevel, Math.max(1, store.get('transport-king.level', 1) | 0));
+  // ---------- saved progress (storage.js) ----------
+  const store = window.TKStore;
+  let maxLevel = 1, menuLevel = 1;
+  function loadProgress() {
+    maxLevel = store.get('max');
+    menuLevel = store.get('level');
+  }
 
   // ---------- drawing ----------
   function shade(hex, amt) {
@@ -286,7 +285,7 @@
       parkCounter: 0, timer: null, over: false, dead: false, els: {},
     };
     G.occ = TK.buildOcc(G.cars, G.W, G.H);
-    store.set('transport-king.level', n);
+    store.set({ level: n });
     applyTheme(theme);
     sfx.setTheme(theme.sound);
     buildStage();
@@ -515,8 +514,8 @@
     g.over = true;
     maxLevel = Math.max(maxLevel, g.n + 1);
     menuLevel = g.n + 1;
-    store.set('transport-king.max', maxLevel);
-    store.set('transport-king.level', menuLevel);
+    store.set({ max: maxLevel, level: menuLevel });
+    store.persist();
     setTimeout(() => {
       if (G !== g) return;
       showOverlay(`<div class="big">&#127881;</div><h2>Level ${g.n} cleared!</h2>
@@ -619,7 +618,13 @@
     soundBtn.setAttribute('aria-pressed', String(sfx.muted));
   };
   soundBtn.addEventListener('click', () => { sfx.toggle(); showSound(); });
-  showSound();
+  const musicBtn = $('#btn-music');
+  const showMusic = () => {
+    musicBtn.classList.toggle('off', !sfx.music);
+    musicBtn.setAttribute('aria-label', sfx.music ? 'Turn music off' : 'Turn music on');
+    musicBtn.setAttribute('aria-pressed', String(!sfx.music));
+  };
+  musicBtn.addEventListener('click', () => { sfx.toggleMusic(); showMusic(); });
   window.addEventListener('resize', layout);
 
   // ---------- installable app ----------
@@ -633,9 +638,14 @@
     navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(() => { /* offline support is optional */ });
   }
 
-  // Used by automated browser tests: index.html#debug
-  if (location.hash === '#debug') window.TKDebug = { game: () => G, startLevel };
-
-  startLevel(menuLevel);
-  showMenu();
+  // Wait for the saved game (IndexedDB) so the menu opens on the right level.
+  store.ready.then(() => {
+    loadProgress();
+    showSound();
+    showMusic();
+    startLevel(menuLevel);
+    showMenu();
+    // Used by automated browser tests: index.html#debug
+    if (location.hash === '#debug') window.TKDebug = { game: () => G, startLevel };
+  });
 })();

@@ -6,17 +6,21 @@
  *   select  vehicle tapped and free to go     drive  vehicle driving to its spot
  *   board   passenger gets in (pitch climbs as seats fill)
  * Shared sounds: bump (blocked), nospot, full, win, lose.
+ * Each theme also has a soft background music loop, toggled separately.
+ * Preferences are saved through TKStore (storage.js) when it is loaded.
  */
 (function (root) {
   'use strict';
 
-  const STORAGE_KEY = 'transport-king.muted';
   const AC = root.AudioContext || root.webkitAudioContext;
+  const memory = { muted: false, music: true };
+  const store = root.TKStore || { get: (k) => memory[k], set: (c) => Object.assign(memory, c), ready: Promise.resolve() };
 
   let ctx = null, master = null, noiseBuf = null;
   let theme = 'city';
-  let muted = false;
-  try { muted = root.localStorage.getItem(STORAGE_KEY) === '1'; } catch (e) { /* ignore */ }
+  let unlocked = false; // audio has started inside a user gesture
+  const isMuted = () => !!store.get('muted');
+  const musicOn = () => !!store.get('music');
   const history = []; // recent sounds, for tests and debugging
 
   function ensure() {
@@ -43,18 +47,18 @@
   }
 
   // ---------- building blocks ----------
-  function envelope(t, dur, vol, attack) {
+  function envelope(t, dur, vol, attack, dest) {
     const g = ctx.createGain();
     g.gain.setValueAtTime(0.0001, t);
     g.gain.exponentialRampToValueAtTime(vol, t + attack);
     g.gain.setValueAtTime(vol, t + Math.max(attack, dur * 0.6));
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    g.connect(master);
+    g.connect(dest || master);
     return g;
   }
 
   /** One oscillator: optional pitch glide, vibrato and low-pass filter. */
-  function tone({ type = 'sine', f, to, at = 0, dur = 0.15, vol = 0.2, attack = 0.006, vib = 0, rate = 6, filter }) {
+  function tone({ type = 'sine', f, to, at = 0, dur = 0.15, vol = 0.2, attack = 0.006, vib = 0, rate = 6, filter, out: dest }) {
     const t = ctx.currentTime + at;
     const o = ctx.createOscillator();
     o.type = type;
@@ -77,7 +81,7 @@
       o.connect(fl);
       out = fl;
     }
-    out.connect(envelope(t, dur, vol, attack));
+    out.connect(envelope(t, dur, vol, attack, dest));
     o.start(t);
     o.stop(t + dur + 0.05);
   }
@@ -231,6 +235,68 @@
     },
   };
 
+  // ---------- background music ----------
+  // A gentle I-V-vi-IV loop in eighth notes: an arpeggio over a soft bass,
+  // with each theme's own tempo, key and instrument. Notes are scheduled a
+  // little ahead on the audio clock so timing stays steady.
+  const CHORDS = [[0, 4, 7], [7, 11, 14], [9, 12, 16], [5, 9, 12]];
+  const MUSIC = {
+    city:   { bpm: 112, root: 262, wave: 'triangle', arp: [0, 1, 2, 1, 0, 1, 2, 3], vol: 0.05 },
+    space:  { bpm: 88,  root: 220, wave: 'sine',     arp: [0, 2, 3, 2, 1, 2, 3, 2], vol: 0.06, filter: 2400 },
+    harbor: { bpm: 96,  root: 196, wave: 'triangle', arp: [0, 1, 2, 3, 2, 1, 0, 1], vol: 0.05 },
+    pets:   { bpm: 120, root: 294, wave: 'square',   arp: [0, 2, 1, 2, 0, 2, 1, 3], vol: 0.025, filter: 1400 },
+    candy:  { bpm: 126, root: 349, wave: 'sine',     arp: [0, 1, 2, 3, 2, 3, 1, 2], vol: 0.06 },
+    school: { bpm: 108, root: 247, wave: 'triangle', arp: [0, 2, 1, 2, 0, 2, 3, 2], vol: 0.05 },
+  };
+  const music = { gain: null, timer: null, next: 0, step: 0 };
+  const semis = (base, n) => base * Math.pow(2, n / 12);
+
+  function musicStep(step, t) {
+    const m = MUSIC[theme] || MUSIC.city;
+    const chord = CHORDS[Math.floor(step / 8) % CHORDS.length];
+    const i = m.arp[step % 8];
+    const n = chord[i % 3] + (i >= 3 ? 12 : 0);
+    const len = 60 / m.bpm / 2;
+    const at = Math.max(0, t - ctx.currentTime);
+    tone({ type: m.wave, f: semis(m.root, n), at, dur: len * 0.9, vol: m.vol, attack: 0.01, filter: m.filter, out: music.gain });
+    if (step % 4 === 0) {
+      tone({ type: 'sine', f: semis(m.root / 2, chord[0]), at, dur: len * 3.6, vol: m.vol * 1.4, attack: 0.02, out: music.gain });
+    }
+  }
+  function musicTick() {
+    if (!ctx) return;
+    const len = 60 / (MUSIC[theme] || MUSIC.city).bpm / 2;
+    if (music.next < ctx.currentTime) music.next = ctx.currentTime + 0.05; // fell behind (tab was asleep)
+    while (music.next < ctx.currentTime + 0.3) {
+      try { musicStep(music.step, music.next); } catch (e) { /* never let audio break the game */ }
+      music.next += len;
+      music.step++;
+    }
+  }
+  const hidden = () => !!(root.document && root.document.hidden);
+  function updateMusic() {
+    const want = unlocked && musicOn() && !isMuted() && !hidden() && !!AC;
+    if (want && !music.timer) {
+      if (!ensure()) return;
+      if (!music.gain) { music.gain = ctx.createGain(); music.gain.connect(master); }
+      const g = music.gain.gain, t = ctx.currentTime;
+      g.cancelScheduledValues(t);
+      g.setValueAtTime(0.0001, t);
+      g.exponentialRampToValueAtTime(1, t + 0.8);
+      music.next = t + 0.1;
+      music.step = 0;
+      musicTick();
+      music.timer = root.setInterval(musicTick, 100);
+    } else if (!want && music.timer) {
+      root.clearInterval(music.timer);
+      music.timer = null;
+      const g = music.gain.gain, t = ctx.currentTime;
+      g.cancelScheduledValues(t);
+      g.setValueAtTime(Math.max(0.0001, g.value), t);
+      g.exponentialRampToValueAtTime(0.0001, t + 0.25);
+    }
+  }
+
   const SOUNDS = ['select', 'drive', 'board', 'bump', 'nospot', 'full', 'win', 'lose'];
 
   /** Plays a sound for the current theme. Returns whether anything was scheduled. */
@@ -238,7 +304,7 @@
     const entry = { name, theme, played: false };
     history.push(entry);
     if (history.length > 100) history.shift();
-    if (muted || !ensure()) return false;
+    if (isMuted() || !ensure()) return false;
     const fn = (BANKS[theme] && BANKS[theme][name]) || SHARED[name];
     if (!fn) return false;
     try { fn(opts); entry.played = true; } catch (e) { /* never let audio break the game */ }
@@ -246,10 +312,15 @@
   }
 
   function setMuted(m) {
-    muted = !!m;
-    try { root.localStorage.setItem(STORAGE_KEY, muted ? '1' : '0'); } catch (e) { /* ignore */ }
-    if (!muted) ensure();
-    return muted;
+    store.set({ muted: !!m });
+    if (!isMuted()) ensure();
+    updateMusic();
+    return isMuted();
+  }
+  function setMusic(on) {
+    store.set({ music: !!on });
+    updateMusic();
+    return musicOn();
   }
 
   // iOS silences Web Audio with the ring/silent switch unless the page asks
@@ -260,7 +331,9 @@
   // not one, so listen to the events that are and keep listening until the
   // context is actually running. Playing a silent buffer unlocks older iOS.
   function unlock() {
-    if (muted || !ensure()) return;
+    unlocked = true; // a gesture happened, so music may start once unmuted
+    if (isMuted() || !ensure()) return;
+    updateMusic();
     try {
       const src = ctx.createBufferSource();
       src.buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
@@ -274,17 +347,24 @@
   const UNLOCK_EVENTS = ['pointerup', 'touchend', 'mousedown', 'keydown', 'click'];
   if (root.document) {
     for (const ev of UNLOCK_EVENTS) root.document.addEventListener(ev, unlock, true);
+    root.document.addEventListener('visibilitychange', updateMusic);
   }
+  store.ready.then(updateMusic, () => { /* ignore */ });
 
   root.TKSound = {
     THEMES: Object.keys(BANKS),
     SOUNDS,
     history,
     play,
-    setTheme(k) { theme = BANKS[k] ? k : 'city'; return theme; },
+    setTheme(k) { theme = BANKS[k] ? k : 'city'; music.step = 0; return theme; },
     get theme() { return theme; },
-    get muted() { return muted; },
+    get muted() { return isMuted(); },
     setMuted,
-    toggle() { return setMuted(!muted); },
+    toggle() { return setMuted(!isMuted()); },
+    get music() { return musicOn(); },
+    /** Whether music is actually playing right now. */
+    get musicPlaying() { return !!music.timer; },
+    setMusic,
+    toggleMusic() { return setMusic(!musicOn()); },
   };
 })(typeof window !== 'undefined' ? window : globalThis);
