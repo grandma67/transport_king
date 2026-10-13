@@ -39,12 +39,13 @@
   let geo = null; // current layout measurements
 
   // ---------- storage (best effort) ----------
+  // Keys are namespaced: other games share this origin on GitHub Pages.
   const store = {
     get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* ignore */ } },
   };
-  let maxLevel = Math.max(1, store.get('tk.max', 1) | 0);
-  let menuLevel = Math.min(maxLevel, Math.max(1, store.get('tk.level', 1) | 0));
+  let maxLevel = Math.max(1, store.get('transport-king.max', 1) | 0);
+  let menuLevel = Math.min(maxLevel, Math.max(1, store.get('transport-king.level', 1) | 0));
 
   // ---------- drawing ----------
   function shade(hex, amt) {
@@ -284,7 +285,7 @@
       parkCounter: 0, timer: null, over: false, dead: false, els: {},
     };
     G.occ = TK.buildOcc(G.cars, G.W, G.H);
-    store.set('tk.level', n);
+    store.set('transport-king.level', n);
     applyTheme(theme);
     buildStage();
     layout();
@@ -509,8 +510,8 @@
     g.over = true;
     maxLevel = Math.max(maxLevel, g.n + 1);
     menuLevel = g.n + 1;
-    store.set('tk.max', maxLevel);
-    store.set('tk.level', menuLevel);
+    store.set('transport-king.max', maxLevel);
+    store.set('transport-king.level', menuLevel);
     setTimeout(() => {
       if (G !== g) return;
       showOverlay(`<div class="big">&#127881;</div><h2>Level ${g.n} cleared!</h2>
@@ -568,6 +569,7 @@
         <button data-act="lvl-up" aria-label="Next level" ${menuLevel >= maxLevel ? 'disabled' : ''}>&rsaquo;</button>
       </div>
       <button class="btn" data-act="play">Play</button>
+      ${installPrompt ? '<button class="btn secondary" data-act="install">Install app</button>' : ''}
       ${G && !G.over ? '<button class="btn secondary" data-act="resume">Resume</button>' : ''}`);
   }
 
@@ -593,6 +595,10 @@
       case 'next': startLevel(G.n + 1); break;
       case 'retry': startLevel(G.n); break;
       case 'menu': showMenu(); break;
+      case 'install':
+        installPrompt.prompt();
+        installPrompt.userChoice.finally(() => { installPrompt = null; showMenu(); });
+        break;
       case 'lvl-down': menuLevel = Math.max(1, menuLevel - 1); showMenu(); break;
       case 'lvl-up': menuLevel = Math.min(maxLevel, menuLevel + 1); showMenu(); break;
     }
@@ -600,6 +606,17 @@
   $('#btn-menu').addEventListener('click', showMenu);
   $('#btn-restart').addEventListener('click', () => startLevel(G.n));
   window.addEventListener('resize', layout);
+
+  // ---------- installable app ----------
+  let installPrompt = null;
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    installPrompt = e;
+    if (overlay.querySelector('[data-act=play]')) showMenu();
+  });
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(() => { /* offline support is optional */ });
+  }
 
   // Used by automated browser tests: index.html#debug
   if (location.hash === '#debug') window.TKDebug = { game: () => G, startLevel };

@@ -27,6 +27,8 @@ jobs:
           node-version: 22
       - name: Check that levels are solvable
         run: node tests/levels.test.js 500
+      - name: Stamp service worker cache with the build
+        run: sed -i "s/const BUILD = 'dev';/const BUILD = '${GITHUB_SHA::7}';/" sw.js && grep -n "const BUILD" sw.js
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
