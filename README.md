@@ -38,7 +38,7 @@ The game is meant to share `user.github.io` with other games, so the manifest ha
 
 ## Tests
 
-No dependencies are needed, only Node 22+ and, for the browser tests, Google Chrome (set `CHROME_PATH` if it is not found).
+No dependencies are needed, only Node 24+ (see `.nvmrc`) and, for the browser tests, Google Chrome (set `CHROME_PATH` if it is not found).
 
 ```sh
 npm test            # everything
