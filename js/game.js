@@ -10,6 +10,7 @@
 
   const TK = window.TKLevels;
   const sfx = window.TKSound;
+  const solver = window.TKSolver;
   const { PALETTE, DIRS } = TK;
 
   const THEMES = [
@@ -273,6 +274,7 @@
   // ---------- level setup ----------
   function startLevel(n) {
     if (G) { clearTimeout(G.timer); G.dead = true; }
+    if (solving) solving.abort();
     hideOverlay();
     const data = TK.generateLevel(n);
     const theme = THEMES[data.themeIndex % THEMES.length];
@@ -282,7 +284,7 @@
       cars: data.cars.map((c) => ({ ...c, state: 'grid', reserved: 0, filled: 0, slot: -1, parkedAt: 0, el: null })),
       slots: new Array(data.slots).fill(null),
       queue: data.queue, head: 0, qEls: new Map(),
-      parkCounter: 0, timer: null, over: false, dead: false, els: {},
+      parkCounter: 0, timer: null, over: false, dead: false, auto: null, els: {},
     };
     G.occ = TK.buildOcc(G.cars, G.W, G.H);
     store.set({ level: n });
@@ -343,6 +345,10 @@
 
   // ---------- player input ----------
   function onCarTap(car) {
+    if (!G.auto) tapCar(car);
+  }
+
+  function tapCar(car) {
     if (G.over || car.state !== 'grid') return;
     const info = TK.firstBlocker(car, G.W, G.H, G.occ);
     if (info.blocker >= 0) { sfx.play('bump'); bump(car, info); return; }
@@ -546,6 +552,103 @@
     }, 900);
   }
 
+  // ---------- auto solver ----------
+  const SOLVE_LIMIT = 10000;
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  let solving = null; // AbortController of the running search
+
+  /** Nothing is driving, boarding or about to leave. */
+  function settled(g) {
+    return !g.timer && g.cars.every((c) => c.state === 'grid' || c.state === 'gone' ||
+      (c.state === 'parked' && c.filled === c.reserved && c.filled < c.cap));
+  }
+  async function untilSettled(g) {
+    while (!g.dead && !g.over && !settled(g)) await wait(80);
+  }
+
+  function snapshot(g) {
+    return {
+      W: g.W, H: g.H, slots: g.K, queue: g.queue, head: g.head, cars: g.cars,
+      grid: g.cars.filter((c) => c.state === 'grid').map((c) => c.id),
+      parked: g.cars.filter((c) => c.state === 'parked').sort((a, b) => a.parkedAt - b.parkedAt)
+        .map((c) => ({ id: c.id, filled: c.filled })),
+    };
+  }
+
+  async function autoSolve() {
+    const g = G;
+    if (g.auto) { g.auto.stop = true; return; } // the button stops a running solve
+    if (g.over || solving) return;
+    const ctl = solving = new AbortController();
+    g.auto = { stop: false }; // the player's taps wait while we think
+    await untilSettled(g);
+    if (!g.dead && !g.over) {
+      showOverlay(`<div class="big thinking">&#129300;</div><h2>Looking for a solution…</h2>
+        <p>This can take up to ${SOLVE_LIMIT / 1000} seconds.</p>
+        <div class="solve-bar"><i style="animation-duration:${SOLVE_LIMIT}ms"></i></div>
+        <button class="btn secondary" data-act="solve-cancel">Cancel</button>`);
+    }
+    const r = g.dead || g.over ? { status: 'cancelled' }
+      : await solver.solve(snapshot(g), { timeLimit: SOLVE_LIMIT, signal: ctl.signal });
+    if (solving === ctl) solving = null;
+    if (r.status !== 'solved') g.auto = null;
+    if (G !== g || r.status === 'cancelled') return;
+    if (r.status === 'unsolvable') {
+      showOverlay(`<div class="big">&#128533;</div><h2>No solution</h2>
+        <p>From here the lot can't be cleared: every way forward ends with the parking full.</p>
+        <button class="btn" data-act="retry">Restart level</button>
+        <button class="btn secondary" data-act="resume">Keep playing</button>`);
+    } else if (r.status === 'timeout') {
+      showOverlay(`<div class="big">&#9201;&#65039;</div><h2>Out of time</h2>
+        <p>No solution found within ${SOLVE_LIMIT / 1000} seconds. Make a few moves and try again.</p>
+        <button class="btn" data-act="resume">Keep playing</button>`);
+    } else {
+      hideOverlay();
+      playSolution(g, r.moves);
+    }
+  }
+
+  // Plays the moves slowly: a hand glides to each vehicle, it glows, and the hand taps it.
+  async function playSolution(g, moves) {
+    const auto = g.auto;
+    const live = () => G === g && !g.dead && !auto.stop;
+    const hand = document.createElement('div');
+    hand.className = 'hand';
+    hand.innerHTML = '<span>&#128070;</span>';
+    hand.style.transform = `translate(${geo.sw / 2}px, ${geo.sh}px)`;
+    const bar = document.createElement('button');
+    bar.className = 'autobar';
+    stage.append(hand, bar);
+    void hand.offsetWidth; // so the first glide starts from the bottom
+    bar.addEventListener('click', () => { auto.stop = true; });
+    $('#btn-solve').classList.add('on');
+    for (let i = 0; i < moves.length && live(); i++) {
+      bar.innerHTML = `&#129302; Solving… move ${i + 1} of ${moves.length} <b>Stop</b>`;
+      await untilSettled(g);
+      await wait(i ? 450 : 150);
+      if (!live()) break;
+      const car = g.cars[moves[i]];
+      const [cx, cy] = carCenter(car);
+      hand.classList.add('show');
+      hand.style.transform = `translate(${cx - 12}px, ${cy - 4}px)`;
+      car.el.classList.add('hint');
+      await wait(850);
+      if (!live()) { car.el.classList.remove('hint'); break; }
+      hand.classList.add('tap');
+      await wait(160);
+      car.el.classList.remove('hint');
+      tapCar(car);
+      await wait(220);
+      hand.classList.remove('tap');
+      if (car.state === 'grid') break; // the board is not what we planned for
+    }
+    hand.classList.remove('show');
+    bar.remove();
+    setTimeout(() => hand.remove(), 400);
+    $('#btn-solve').classList.remove('on');
+    if (g.auto === auto) g.auto = null;
+  }
+
   // ---------- UI ----------
   let toastTimer = null;
   function toast(msg) {
@@ -562,6 +665,7 @@
   function hideOverlay() { overlay.classList.add('hidden'); overlay.innerHTML = ''; }
 
   function showMenu() {
+    if (G && G.auto) G.auto.stop = true;
     showOverlay(`<div class="big">&#128661;</div><h1>Transport King</h1>
       <ul>
         <li>Tap a vehicle whose path is clear to send it to a parking spot.</li>
@@ -600,6 +704,7 @@
       case 'resume': hideOverlay(); break;
       case 'next': startLevel(G.n + 1); break;
       case 'retry': startLevel(G.n); break;
+      case 'solve-cancel': if (solving) solving.abort(); hideOverlay(); break;
       case 'menu': showMenu(); break;
       case 'install':
         installPrompt.prompt();
@@ -611,6 +716,7 @@
   });
   $('#btn-menu').addEventListener('click', showMenu);
   $('#btn-restart').addEventListener('click', () => startLevel(G.n));
+  $('#btn-solve').addEventListener('click', autoSolve);
   const soundBtn = $('#btn-sound');
   const showSound = () => {
     soundBtn.textContent = sfx.muted ? '\u{1F507}' : '\u{1F50A}';

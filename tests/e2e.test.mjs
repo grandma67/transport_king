@@ -425,6 +425,54 @@ e2e('the top bar fits on a small phone', async () => {
   }
 });
 
+e2e('the solve button finds a solution and plays it to a win', { timeout: 240000 }, async () => {
+  await startLevel(1);
+  // the player made a move first; the solver starts from the current board
+  await js(`(() => { const g = TKDebug.game(); g.cars[g.data.solution[0]].el.click(); })(), true`);
+  await js(`document.getElementById('btn-solve').click(), true`);
+  await until(`!!document.querySelector('.autobar') && !!document.querySelector('.car.hint')`, 15000);
+  assert.ok(await js(`document.getElementById('btn-solve').classList.contains('on')`));
+  // the player's own taps are ignored while it plays
+  assert.equal(await js(`(() => { const g = TKDebug.game();
+    const c = g.cars.find((c) => c.state === 'grid' && !c.el.classList.contains('hint') && TKLevels.firstBlocker(c, g.W, g.H, g.occ).blocker < 0);
+    if (!c) return 'grid'; c.el.click(); return c.state; })()`), 'grid');
+  await until(`!!document.querySelector('[data-act=next]')`, 220000); // it plays slowly on purpose
+  assert.equal(await js(`TKDebug.game().cars.filter((c) => c.state !== 'gone').length`), 0);
+  assert.equal(await js(`!!document.querySelector('.autobar')`), false);
+});
+
+e2e('the stop button hands control back to the player', async () => {
+  await startLevel(5);
+  await js(`document.getElementById('btn-solve').click(), true`);
+  await until(`!!document.querySelector('.autobar')`, 15000);
+  await js(`document.querySelector('.autobar').click(), true`);
+  await until(`!document.querySelector('.autobar') && !TKDebug.game().auto`, 5000);
+  const moved = await js(`(() => { const g = TKDebug.game();
+    const c = g.cars.find((c) => c.state === 'grid' && TKLevels.firstBlocker(c, g.W, g.H, g.occ).blocker < 0);
+    c.el.click(); return c.state; })()`);
+  assert.notEqual(moved, 'grid');
+});
+
+e2e('the solver says so when there is no solution, or when it runs out of time', async () => {
+  const real = await js(`(window.__solve = TKSolver.solve, true)`);
+  assert.ok(real);
+  try {
+    await startLevel(6);
+    await js(`TKSolver.solve = async () => ({ status: 'unsolvable' }), document.getElementById('btn-solve').click(), true`);
+    await until(`/No solution/.test(document.querySelector('.panel h2')?.textContent)`);
+    assert.ok(await js(`!!document.querySelector('[data-act=retry]')`));
+    await js(`document.querySelector('[data-act=resume]').click(), true`);
+    assert.equal(await js(`TKDebug.game().auto`), null);
+
+    await js(`TKSolver.solve = async () => ({ status: 'timeout' }), document.getElementById('btn-solve').click(), true`);
+    await until(`/Out of time/.test(document.querySelector('.panel h2')?.textContent)`);
+    assert.match(await js(`document.querySelector('.panel p').textContent`), /10 seconds/);
+    await js(`document.querySelector('[data-act=resume]').click(), true`);
+  } finally {
+    await js(`(TKSolver.solve = window.__solve), true`);
+  }
+});
+
 e2e('no page errors during the whole run', () => {
   assert.deepEqual(pageErrors, []);
 });

@@ -10,6 +10,7 @@ A puzzle game for the browser with endless levels. Unblock the parking lot, park
 - The front passenger boards a parked vehicle of the same colour. When a vehicle is full it leaves and frees its spot.
 - **Win:** every vehicle and passenger is cleared.
 - **Lose:** every spot is taken and the front passenger matches none of the parked vehicles.
+- **Stuck?** Tap 💡 and the game searches for a solution from the board as it is now (for up to 10 seconds). If it finds one, a hand slowly taps each vehicle in turn so you can watch and learn; tap **Stop** to take over again. If there is no way out, or the search runs out of time, it tells you.
 
 ## Levels
 

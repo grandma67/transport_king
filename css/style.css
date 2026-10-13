@@ -37,6 +37,7 @@ button { font: inherit; }
 }
 .hud-btn:active { transform: translateY(2px); box-shadow: 0 1px 0 rgba(0, 0, 0, 0.18); }
 .hud-btn.off { opacity: 0.55; }
+.hud-btn.on { background: #ffe066; box-shadow: 0 0 0 3px rgba(255, 200, 0, 0.55), 0 3px 0 rgba(0, 0, 0, 0.18); }
 .hud-btn.off::after {
   content: ''; position: absolute; left: 7px; right: 7px; top: 50%;
   height: 3px; border-radius: 2px; background: #d33;
@@ -102,6 +103,32 @@ button { font: inherit; }
 .car.moving { z-index: 10; cursor: default; }
 .car.parked { z-index: 3; cursor: default; }
 .car.hit { animation: hit 0.35s; }
+.car.hint { z-index: 9; animation: hint 0.9s ease-in-out infinite; }
+
+/* ---------- auto solver ---------- */
+.hand {
+  z-index: 30; font-size: 34px; line-height: 1;
+  pointer-events: none; opacity: 0;
+  transition: transform 0.75s cubic-bezier(0.45, 0, 0.25, 1), opacity 0.3s;
+  filter: drop-shadow(0 3px 3px rgba(0, 0, 0, 0.35));
+}
+.hand.show { opacity: 1; }
+.hand span { display: block; transition: transform 0.14s ease-out; }
+.hand.tap span { transform: scale(0.78) translateY(-4px); }
+.autobar {
+  position: absolute; left: 50%; bottom: 10px; z-index: 40;
+  transform: translateX(-50%);
+  display: flex; align-items: center; gap: 8px; white-space: nowrap;
+  border: none; border-radius: 999px; padding: 8px 8px 8px 14px;
+  background: rgba(15, 20, 35, 0.82); color: #fff;
+  font-size: 14px; font-weight: 700; cursor: pointer;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
+  animation: pop 0.25s ease-out;
+}
+.autobar b { background: #ff8a00; border-radius: 999px; padding: 4px 12px; }
+.panel .thinking { animation: think 1.2s ease-in-out infinite; }
+.solve-bar { height: 8px; margin: 14px 4px 2px; border-radius: 4px; background: #e6edf5; overflow: hidden; }
+.solve-bar i { display: block; height: 100%; background: #ff8a00; transform-origin: left; animation: countdown linear forwards; }
 
 .pass {
   z-index: 4;
@@ -176,11 +203,15 @@ button { font: inherit; }
 @keyframes hit { 50% { filter: drop-shadow(0 0 7px #ff2d2d) brightness(1.25); } }
 @keyframes sad { 50% { filter: drop-shadow(0 0 8px #ff2d2d); } }
 @keyframes warn { 50% { border-color: #ff4d4d; background: rgba(255, 60, 60, 0.35); } }
+@keyframes hint { 50% { filter: drop-shadow(0 0 9px #fff36b) drop-shadow(0 0 3px #fff) brightness(1.15); } }
+@keyframes think { 50% { transform: rotate(-10deg) scale(1.08); } }
+@keyframes countdown { from { transform: scaleX(0); } }
 @keyframes fall { to { transform: translateY(110vh) rotate(720deg); } }
 
-/* narrow phones: fit four HUD buttons */
+/* narrow phones: fit five HUD buttons */
 @media (max-width: 360px) {
   #hud { gap: 4px; padding-left: 6px; padding-right: 6px; }
-  .hud-btn { width: 34px; height: 34px; font-size: 18px; }
+  .hud-btn { width: 32px; height: 34px; font-size: 17px; }
+  #hud-level { font-size: 17px; }
   #hud-stats { gap: 6px; }
 }
