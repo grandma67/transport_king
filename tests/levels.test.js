@@ -53,6 +53,24 @@ test('every level can be won within its parking spots', () => {
   }
 });
 
+test('the solver confirms every level can be won', () => {
+  for (const lv of levels) assert.ok(TK.isBeatable(lv), `level ${lv.level}`);
+});
+
+test('a level the solver cannot win is rebuilt from the same random stream', () => {
+  const first = TK.generateLevel(14, { beatable: () => true });
+  let seen = 0;
+  const rejectTwice = () => ++seen > 2;
+  const lv = TK.generateLevel(14, { beatable: rejectTwice });
+  assert.equal(lv.builds, 3);
+  assert.notDeepEqual(lv.cars, first.cars, 'a different map');
+  assert.deepEqual({ W: lv.W, H: lv.H, slots: lv.slots, shape: lv.shape }, { W: first.W, H: first.H, slots: first.slots, shape: first.shape },
+    'same level settings');
+  seen = 0;
+  assert.deepEqual(TK.generateLevel(14, { beatable: rejectTwice }), lv, 'still deterministic');
+  assert.throws(() => TK.generateLevel(14, { beatable: () => false }), /no beatable map/);
+});
+
 test('passengers of each colour exactly fill the seats of that colour', () => {
   for (const lv of levels) {
     const seats = {}, riders = {};

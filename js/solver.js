@@ -111,10 +111,15 @@
 
     function frame(s, move) { return { s, move, list: moves(s), i: 0 }; }
 
-    /** Searches for up to `ms` milliseconds. Returns the result, or null if not finished yet. */
-    function run(ms) {
+    /**
+     * Searches for up to `ms` milliseconds, and at most `maxSteps` steps in total
+     * (a step budget gives the same answer on every device). Returns the result,
+     * or null if not finished yet.
+     */
+    function run(ms, maxSteps = Infinity) {
       const deadline = Date.now() + ms;
       while (!result) {
+        if (explored >= maxSteps) return null;
         if ((++explored & 63) === 0 && Date.now() > deadline) return null;
         const f = stack[stack.length - 1];
         if (!f) { result = { status: 'unsolvable' }; break; }

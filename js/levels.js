@@ -10,6 +10,8 @@
  *  - passenger counts per colour exactly equal the seats of that colour;
  *  - the queue is built from a real solution that never needs more than
  *    `slots` parking spots at once, so a careful player can always win.
+ *  - the solver (solver.js) confirms it can be won; if not, the map is
+ *    built again from the same random stream.
  *
  * Map size, spots (1-6), colours, seats per vehicle and how much of the line
  * is visible are all rolled from the level seed. Several mazes are built per
@@ -314,14 +316,44 @@
     return q;
   }
 
-  function generateLevel(n) {
+  // How hard the solver may work to prove a level can be won. A step budget,
+  // not a time limit, so a level comes out the same on every device.
+  const SOLVE_STEPS = 200000;
+  const MAX_BUILDS = 50;
+
+  /** True if the solver finds a way to clear the level from its start. */
+  function isBeatable(lv) {
+    const solver = root.TKSolver || (typeof require === 'function' ? require('./solver.js') : null);
+    if (!solver) throw new Error('TKSolver is not loaded');
+    const board = { W: lv.W, H: lv.H, slots: lv.slots, queue: lv.queue, head: 0, cars: lv.cars,
+      grid: lv.cars.map((c) => c.id), parked: [] };
+    const r = solver.createSearch(board).run(Infinity, SOLVE_STEPS);
+    return !!r && r.status === 'solved';
+  }
+
+  /**
+   * Level n, built from its seed. Every level is checked with the solver; if it
+   * cannot be won, the map is built again from the same random stream until one
+   * can, so the result is still the same level n everywhere.
+   * `beatable` is replaceable for tests.
+   */
+  function generateLevel(n, { beatable = isBeatable } = {}) {
     n = Math.max(1, Math.floor(n));
     const rng = mulberry32(hashInt(n));
     const p = params(n, rng);
-    const { W, H } = p;
     const names = Object.keys(SHAPES);
     const shapeName = n === 1 ? 'rect' : names[Math.floor(rng() * names.length)];
+    let lv;
+    for (let builds = 1; builds <= MAX_BUILDS; builds++) {
+      lv = buildLevel(n, p, shapeName, rng);
+      lv.builds = builds;
+      if (beatable(lv)) return lv;
+    }
+    throw new Error(`level ${n}: no beatable map in ${MAX_BUILDS} builds`);
+  }
 
+  function buildLevel(n, p, shapeName, rng) {
+    const { W, H } = p;
     // Build several solvable mazes and keep the one with the deepest blocking chains.
     let best = null;
     for (let attempt = 0, built = 0; attempt < 40 && built < p.candidates; attempt++) {
@@ -370,7 +402,7 @@
   }
 
 
-  const api = { PALETTE, VEHICLES, THEME_COUNT, DIRS, SHAPES, params, generateLevel, firstBlocker, buildOcc, carCells };
+  const api = { PALETTE, VEHICLES, THEME_COUNT, DIRS, SHAPES, params, generateLevel, isBeatable, firstBlocker, buildOcc, carCells };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.TKLevels = api;
 })(typeof window !== 'undefined' ? window : globalThis);

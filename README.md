@@ -14,7 +14,7 @@ A puzzle game for the browser with endless levels. Unblock the parking lot, park
 
 ## Levels
 
-Levels are generated from their number (seeded), so level 42 is always the same level 42, and there is no last level. The seed rolls the lot size (up to 10×14), the number of parking spots (1–6), the number of colours (always more than the spots), the seats per vehicle, and how much of the line you can see. Each level builds several mazes and keeps the one with the longest chains of blocking vehicles.
+Levels are generated from their number (seeded), so level 42 is always the same level 42, and there is no last level. The seed rolls the lot size (up to 10×14), the number of parking spots (1–6), the number of colours (always more than the spots), the seats per vehicle, and how much of the line you can see. Each level builds several mazes and keeps the one with the longest chains of blocking vehicles. Then the solver plays it: if it cannot be won, the map is built again from the same seeded random stream until one can, so every level is beatable and still the same on every device.
 
 - **Vehicles:** car (1×2), van (1×3), long bus (1×4), and a two-lane big bus (2×3) that needs both lanes clear to leave. Bigger vehicles carry more passengers.
 
